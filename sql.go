@@ -1,11 +1,40 @@
-package sharding
+package shards
 
 import (
 	"database/sql"
 	"errors"
 	"fmt"
+)
 
-	"github.com/gustapinto/go-shards/pkg/maps"
+type ReplicationStrategy string
+
+const (
+	// ReplicateNone Disable shard data replication
+	ReplicateNone ReplicationStrategy = "ReplicateNone"
+
+	// ReplicateAll Replicates data to every shard replica synchronously
+	// on every transaction, every replication operation must succeed for the transaction
+	// to commit
+	ReplicateAll ReplicationStrategy = "ReplicateAll"
+
+	// ReplicateSome Replicates data to every shard replica synchronously
+	// on every transaction, at least one replication operation must succeed
+	// for the transaction to commit
+	ReplicateSome ReplicationStrategy = "ReplicateSome" // TODO -> Unimplemented
+)
+
+// TODO -> Unused
+type ReplicaMode string
+
+const (
+	// ReadWrite Enables the shard replica to be used on both Transact and Query calls
+	ReadWrite ReplicaMode = "ReadWrite"
+
+	// ReadOnly Enables the shard replica to be used only to read data on Query
+	ReadOnly ReplicaMode = "ReadOnly"
+
+	// WriteOnly Enables the shard replica to be used only to mutate data on Transact
+	WriteOnly ReplicaMode = "WriteOnly"
 )
 
 type SqlShardReplica struct {
@@ -107,14 +136,14 @@ type SqlQuerierConfig struct {
 
 type SqlQuerier struct {
 	replicationStrategy ReplicationStrategy
-	shards              *maps.SafeMap[string, *sqlQuerierShard]
+	shards              *SafeMap[string, *sqlQuerierShard]
 }
 
 // Creates a new sql sharded querier. Must be closed
 func NewSqlQuerier(config *SqlQuerierConfig) (*SqlQuerier, error) {
 	sqlQuerier := SqlQuerier{
 		replicationStrategy: config.ReplicationStrategy,
-		shards:              maps.NewSafeMap[string, *sqlQuerierShard](),
+		shards:              NewSafeMap[string, *sqlQuerierShard](),
 	}
 
 	for _, shard := range config.Shards {

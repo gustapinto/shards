@@ -5,24 +5,23 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gustapinto/go-shards/pkg/sharding"
-
+	"github.com/gustapinto/shards"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
-	querier, err := sharding.NewSqlQuerier(&sharding.SqlQuerierConfig{
-		ReplicationStrategy: sharding.ReplicateAll,
-		Shards: []sharding.SqlShard{
-			sharding.NewSqlShard(
+	querier, err := shards.NewSqlQuerier(&shards.SqlQuerierConfig{
+		ReplicationStrategy: shards.ReplicateAll,
+		Shards: []shards.SqlShard{
+			shards.NewSqlShard(
 				"db1",
 				"pgx",
 				"postgresql://db1:db1@localhost:5432/db1?sslmode=disable",
-				sharding.NewSqlShardReplica(
+				shards.NewSqlShardReplica(
 					"db1-repl1",
 					"pgx",
 					"postgresql://db2:db2@localhost:5433/db2?sslmode=disable")),
-			sharding.NewSqlShard(
+			shards.NewSqlShard(
 				"db3",
 				"pgx",
 				"postgresql://db3:db3@localhost:5434/db3?sslmode=disable"),
