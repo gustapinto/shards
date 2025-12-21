@@ -10,6 +10,7 @@ type SafeMap[K comparable, V any] struct {
 	data map[K]V
 }
 
+// NewSafeMap Initializes a safe-map
 func NewSafeMap[K comparable, V any]() *SafeMap[K, V] {
 	return &SafeMap[K, V]{
 		lock: sync.RWMutex{},
