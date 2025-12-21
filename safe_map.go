@@ -44,7 +44,8 @@ func (s *SafeMap[K, V]) Del(key K) {
 	delete(s.data, key)
 }
 
-// Lookup Returns a read-locked copy of the current underlying map
+// Lookup Returns a read-locked copy of the current underlying map. Note
+// that it does not guarantee ordering
 func (s *SafeMap[K, V]) Lookup() map[K]V {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
@@ -57,7 +58,8 @@ func (s *SafeMap[K, V]) Lookup() map[K]V {
 	return snap
 }
 
-// Lookup Returns a read-locked copy of the current underlying map keys
+// Keys Returns a read-locked copy of the current underlying map keys. Note
+// that it does not guarantee ordering
 func (s *SafeMap[K, V]) Keys() (keys []K) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
@@ -67,6 +69,19 @@ func (s *SafeMap[K, V]) Keys() (keys []K) {
 	}
 
 	return keys
+}
+
+// Values Returns a read-locked copy of the current underlying map values. Note
+// that it does not guarantee ordering
+func (s *SafeMap[K, V]) Values() (values []V) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	for _, v := range s.data {
+		values = append(values, v)
+	}
+
+	return values
 }
 
 // Clone Creates a read-locked deep copy of this SafeMap
