@@ -4,7 +4,8 @@ import (
 	"sync"
 )
 
-// SafeMap Is a simple, thread safe, strong typed map implementation
+// SafeMap Is a simple, thread safe, strongly typed map implementation backed by
+// [sync.RWMutex]
 type SafeMap[K comparable, V any] struct {
 	lock sync.RWMutex
 	data map[K]V
@@ -14,21 +15,26 @@ type SafeMap[K comparable, V any] struct {
 func NewSafeMap[K comparable, V any]() *SafeMap[K, V] {
 	return &SafeMap[K, V]{
 		lock: sync.RWMutex{},
-		data: make(map[K]V, 0),
+		data: make(map[K]V),
 	}
 }
 
+// Len Returns the current read-locked size for the SafeMap
+func (s *SafeMap[K, V]) Len() int {
+	return len(s.data)
+}
+
 // Get Returns the current read-locked value for the key
-func (s *SafeMap[K, V]) Get(key K) (value V, exists bool) {
+func (s *SafeMap[K, V]) Get(key K) (V, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	v, e := s.data[key]
+	value, exists := s.data[key]
 
-	return v, e
+	return value, exists
 }
 
-// Set Upserts a key->value value in the map
+// Set Upserts a key->pair in the map
 func (s *SafeMap[K, V]) Set(key K, value V) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -50,12 +56,12 @@ func (s *SafeMap[K, V]) Lookup() map[K]V {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	snap := make(map[K]V, len(s.data))
+	snapshot := make(map[K]V, len(s.data))
 	for k, v := range s.data {
-		snap[k] = v
+		snapshot[k] = v
 	}
 
-	return snap
+	return snapshot
 }
 
 // Keys Returns a read-locked copy of the current underlying map keys. Note

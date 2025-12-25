@@ -1,4 +1,4 @@
-module github.com/gustapinto/shards/cmd/example
+module github.com/gustapinto/shards/examples/basic_usage
 
 go 1.25.5
 
