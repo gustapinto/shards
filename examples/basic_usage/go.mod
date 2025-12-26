@@ -2,10 +2,8 @@ module github.com/gustapinto/shards/examples/basic_usage
 
 go 1.25.5
 
-replace github.com/gustapinto/shards => ../../
-
 require (
-	github.com/gustapinto/shards v0.0.0-00010101000000-000000000000
+	github.com/gustapinto/shards v0.2.1
 	github.com/jackc/pgx/v5 v5.7.6
 )
 

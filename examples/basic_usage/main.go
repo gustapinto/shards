@@ -2,7 +2,7 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
+	"log"
 
 	"github.com/gustapinto/shards"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -14,17 +14,22 @@ func main() {
 		shards.NewShard("db-2", "pgx", "postgresql://db2:db2@localhost:5433/db2?sslmode=disable"),
 		shards.NewShard("db-3", "pgx", "postgresql://db3:db3@localhost:5434/db3?sslmode=disable"))
 	if err != nil {
-		panic(err)
+		log.Fatalln(err.Error())
 	}
-	defer shards.CloseAll()
+	defer func() {
+		errs := shards.CloseAll()
+		for _, e := range errs {
+			log.Printf("Failed to close shard, got error %s", e.Error())
+		}
+	}()
 
-	// Using the lower level APIs
+	// Using the lower level "DB" APIs
 	for _, shard := range shards.Lookup() {
-		fmt.Printf("Running query on shard %+v\n", shard)
+		log.Printf("Running query on shard %s\n", shard.Key)
 
 		_, err := shards.DB(shard.Key).Exec(`CREATE TABLE IF NOT EXISTS example ( id BIGSERIAL PRIMARY KEY, foo VARCHAR(255) )`)
 		if err != nil {
-			panic(err)
+			log.Fatalln(err.Error())
 		}
 	}
 
@@ -37,6 +42,6 @@ func main() {
 		return true, nil
 	})
 	if err != nil {
-		panic(err)
+		log.Fatalln(err.Error())
 	}
 }
