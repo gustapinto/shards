@@ -20,6 +20,10 @@ var (
 	// ErrShardNotFound Is used when a shard is not found on the lookup table for
 	// the provided key
 	ErrShardNotFound = errors.New("shard not found")
+
+	// ErrEmptyRegistry Is used when there is a attempt to access a non initialized
+	// registry
+	ErrEmptyRegistry = errors.New("empty registry")
 )
 
 // DoFunc Is the function type used by [github.com/gustapinto/shards.On] and [github.com/gustapinto/shards.OnAll], it
@@ -75,6 +79,10 @@ func Register(shards ...Shard) error {
 
 // CloseAll Closes all shards connections and returns a slice of eventual errors
 func CloseAll() (errs []error) {
+	if _shards == nil {
+		return nil
+	}
+
 	for _, key := range _shards.Keys() {
 		if err := closeShard(key); err != nil {
 			errs = append(errs, err)
@@ -115,6 +123,10 @@ func DB(key string) *sql.DB {
 // and Commit from within the "do" function. For the transaction to commit it is
 // necessary to return true from the [github.com/gustapinto/shards.DoFunc]
 func On(key string, do DoFunc) error {
+	if _shards == nil {
+		return ErrEmptyRegistry
+	}
+
 	shard, exists := _shards.Get(key)
 	if !exists {
 		return ErrShardNotFound
@@ -153,6 +165,10 @@ func On(key string, do DoFunc) error {
 // The transaction isolation level is shard-specific. For the transaction to commit it is necessary to
 // return true from the [github.com/gustapinto/shards.DoFunc]
 func OnAll(do DoFunc) error {
+	if _shards == nil {
+		return ErrEmptyRegistry
+	}
+
 	for _, key := range _shards.Keys() {
 		if err := On(key, do); err != nil {
 			return err
