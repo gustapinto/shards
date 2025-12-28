@@ -3,6 +3,7 @@ package shards
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 var (
@@ -23,34 +24,37 @@ type DoFunc func(shard Shard, tx *sql.Tx) (commit bool, err error)
 //
 // Note that to use the Querier API one also needs to register the shards using [github.com/gustapinto/shards.Register]
 type Querier struct {
-	loadedShards []*Shard
-
-	failFast bool
+	parallel       bool
+	failFast       bool
+	selectedShards []*Shard
 }
 
 // On Select and load the shards by key into the querier, the selected shards will be used on
 // the [Querier.Do] method. If a shard key does not exists in the registry it will be ignored
 func On(keys ...string) *Querier {
-	var shards []*Shard
+	selectedShards := make([]*Shard, 0, len(keys))
+
 	for _, key := range keys {
 		if shard, exists := shardsLookupTable.Get(key); exists {
-			shards = append(shards, shard)
+			selectedShards = append(selectedShards, shard)
 		}
 	}
 
 	return &Querier{
-		loadedShards: shards,
+		selectedShards: selectedShards,
 	}
 }
 
 // OnAll Select and load all registered shards into the querier, the selected shards will be used on
 // the [Querier.Do] method
 func OnAll() *Querier {
-	return On(shardsLookupTable.Keys()...)
+	return &Querier{
+		selectedShards: shardsLookupTable.Values(),
+	}
 }
 
-// WithFailFast Stops any loop operation on the first non-nil error inside the Querier
-func (sq *Querier) WithFailFast() *Querier {
+// FailFast Configuration stops the [Querier.Do] shard loop operation on the first non-nil error
+func (sq *Querier) FailFast() *Querier {
 	sq.failFast = true
 
 	return sq
@@ -58,50 +62,59 @@ func (sq *Querier) WithFailFast() *Querier {
 
 // Do Execute the [github.com/gustapinto/shards.DoFunc] against the [github.com/gustapinto/shards.ShardQuerier]
 // selected shards with a shard-specific isolation level.
-func (sq *Querier) Do(do DoFunc) (errs []error) {
-	if len(sq.loadedShards) == 0 {
+//
+// Use it with the [Querier.FailFast] configuration method in order to stop the execution on the
+// first selected shard with a non-nil error, otherwise it will return a [errors.Join] of all errors
+func (sq *Querier) Do(do DoFunc) error {
+	if len(sq.selectedShards) == 0 {
 		return nil
 	}
 
-	for _, shard := range sq.loadedShards {
-		if err := doInShard(shard, do); err != nil {
-			errs = append(errs, err)
-
-			if sq.failFast {
-				return errs
-			}
-
-			return
-		}
-	}
-
-	return nil
+	return sq.doSequential(do)
 }
 
 // Package level private functions
-func doInShard(shard *Shard, do DoFunc) error {
-	db := DB(shard.Key)
-	if db == nil {
-		return ErrFailedToOpenDB
+func (sq *Querier) doSequential(do DoFunc) (err error) {
+	for _, shard := range sq.selectedShards {
+		if innerErr := doInShard(shard, do); innerErr != nil {
+			if sq.failFast {
+				return innerErr
+			}
+
+			innerErr = fmt.Errorf("failed on shard [%s] with error [%s]", shard.Key, innerErr.Error())
+			err = errors.Join(err, innerErr)
+		}
 	}
 
-	tx, err := db.Begin()
+	return err
+}
+
+func openTxForShardKey(key string) (*sql.Tx, error) {
+	if db := DB(key); db != nil {
+		return db.Begin()
+	}
+
+	return nil, ErrFailedToOpenDB
+}
+
+func doInShard(shard *Shard, do DoFunc) error {
+	tx, err := openTxForShardKey(shard.Key)
 	if err != nil {
 		return err
 	}
 
-	commit, err := do(shard.Clone(), tx)
+	shouldCommit, err := do(shard.Clone(), tx)
 	if err != nil {
-		if rollErr := tx.Rollback(); !isErrTxDone(rollErr) {
-			return err
+		if rollbackErr := tx.Rollback(); !isErrTxDone(rollbackErr) {
+			return errors.Join(err, rollbackErr)
 		}
 
 		return err
 	}
 
-	if commit {
-		if err := tx.Commit(); !isErrTxDone(err) {
-			return err
+	if shouldCommit {
+		if commitErr := tx.Commit(); !isErrTxDone(commitErr) {
+			return commitErr
 		}
 	}
 

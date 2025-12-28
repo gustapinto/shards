@@ -21,6 +21,9 @@ func NewSafeMap[K comparable, V any]() *SafeMap[K, V] {
 
 // Len Returns the current read-locked size for the SafeMap
 func (s *SafeMap[K, V]) Len() int {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
 	return len(s.data)
 }
 
@@ -50,9 +53,9 @@ func (s *SafeMap[K, V]) Del(key K) {
 	delete(s.data, key)
 }
 
-// Lookup Returns a read-locked copy of the current underlying map. Note
+// Snapshot Returns a read-locked copy of the current underlying map. Note
 // that it does not guarantee ordering
-func (s *SafeMap[K, V]) Lookup() map[K]V {
+func (s *SafeMap[K, V]) Snapshot() map[K]V {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -66,12 +69,15 @@ func (s *SafeMap[K, V]) Lookup() map[K]V {
 
 // Keys Returns a read-locked copy of the current underlying map keys. Note
 // that it does not guarantee ordering
-func (s *SafeMap[K, V]) Keys() (keys []K) {
+func (s *SafeMap[K, V]) Keys() []K {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
+	keys := make([]K, len(s.data))
+	i := 0
 	for k := range s.data {
-		keys = append(keys, k)
+		keys[i] = k
+		i++
 	}
 
 	return keys
@@ -79,21 +85,24 @@ func (s *SafeMap[K, V]) Keys() (keys []K) {
 
 // Values Returns a read-locked copy of the current underlying map values. Note
 // that it does not guarantee ordering
-func (s *SafeMap[K, V]) Values() (values []V) {
+func (s *SafeMap[K, V]) Values() []V {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
+	values := make([]V, len(s.data))
+	i := 0
 	for _, v := range s.data {
-		values = append(values, v)
+		values[i] = v
+		i++
 	}
 
 	return values
 }
 
-// Clone Creates a read-locked deep copy of this SafeMap
+// Clone Creates a read-locked snapshot copy of this SafeMap
 func (s *SafeMap[K, V]) Clone() *SafeMap[K, V] {
 	return &SafeMap[K, V]{
 		lock: sync.RWMutex{},
-		data: s.Lookup(),
+		data: s.Snapshot(),
 	}
 }
