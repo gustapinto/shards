@@ -7,14 +7,12 @@ import (
 )
 
 var (
-	// ErrNoLoadedShards Is used when there is no loaded shards into the [github.com/gustapinto/shards.Querier]
-	ErrNoLoadedShards = errors.New("no shards loaded into querier")
-
 	// ErrFailedToOpenDB Is used when the querier cannot open a connection to the database shard
 	ErrFailedToOpenDB = errors.New("failed to open a database connection for shard")
 )
 
-// DoFunc Is the function type used by [Querier.Do], it must return (true, nil) for the transaction to commit
+// DoFunc Is the function type used by [Querier.Do], it must return (true, nil) for the transaction to commit,
+// otherwise it will be rolled back
 //
 // Please avoid commiting/rolling back the transaction inside the [DoFunc], as it may cause conflicts
 // and errors
@@ -22,9 +20,12 @@ type DoFunc func(shard Shard, tx *sql.Tx) (commit bool, err error)
 
 // Querier Provides an easy to use higher level transactional API over [github.com/gustapinto/shards.DB].
 //
+// It should not be treated as a long-lived object, instead treat it as a transactional one, you get a new one
+// with [github.com/gustapinto/shards.On] or [github.com/gustapinto/shards.OnAll], do what needs to be done
+// and then let the GC do its job.
+//
 // Note that to use the Querier API one also needs to register the shards using [github.com/gustapinto/shards.Register]
 type Querier struct {
-	parallel       bool
 	failFast       bool
 	selectedShards []*Shard
 }
@@ -81,7 +82,7 @@ func (sq *Querier) doSequential(do DoFunc) (err error) {
 				return innerErr
 			}
 
-			innerErr = fmt.Errorf("failed on shard [%s] with error [%s]", shard.Key, innerErr.Error())
+			innerErr = fmt.Errorf("failed on shard %s with error %w", shard.Key, innerErr)
 			err = errors.Join(err, innerErr)
 		}
 	}
@@ -105,23 +106,29 @@ func doInShard(shard *Shard, do DoFunc) error {
 
 	shouldCommit, err := do(shard.Clone(), tx)
 	if err != nil {
-		if rollbackErr := tx.Rollback(); !isErrTxDone(rollbackErr) {
+		if rollbackErr := tx.Rollback(); !isTxDoneErr(rollbackErr) {
 			return errors.Join(err, rollbackErr)
 		}
 
 		return err
 	}
 
-	if shouldCommit {
-		if commitErr := tx.Commit(); !isErrTxDone(commitErr) {
-			return commitErr
+	if !shouldCommit {
+		if rollbackErr := tx.Rollback(); !isTxDoneErr(rollbackErr) {
+			return rollbackErr
 		}
+
+		return nil
+	}
+
+	if commitErr := tx.Commit(); !isTxDoneErr(commitErr) {
+		return commitErr
 	}
 
 	return nil
 }
 
-func isErrTxDone(err error) bool {
+func isTxDoneErr(err error) bool {
 	if err == nil {
 		return false
 	}
