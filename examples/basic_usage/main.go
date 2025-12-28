@@ -16,25 +16,23 @@ func main() {
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
-	defer func() {
-		errs := shards.CloseAll()
-		for _, e := range errs {
-			log.Printf("Failed to close shard, got error %s", e.Error())
-		}
-	}()
+	defer shards.CloseAll()
 
-	// Using the lower level "DB" APIs
-	for _, shard := range shards.Lookup() {
-		log.Printf("Running query on shard %s\n", shard.Key)
+	// Using the lower level "DB" APIs, recommended if you are already using database/sql
+	for _, s := range shards.Lookup() {
+		log.Printf("Running DDL query on shard %s\n", s.Key)
 
-		_, err := shards.DB(shard.Key).Exec(`CREATE TABLE IF NOT EXISTS example ( id BIGSERIAL PRIMARY KEY, foo VARCHAR(255) )`)
+		_, err := shards.DB(s.Key).Exec(`CREATE TABLE IF NOT EXISTS example ( id BIGSERIAL PRIMARY KEY, foo VARCHAR(255) )`)
 		if err != nil {
 			log.Fatalln(err.Error())
 		}
 	}
 
-	// Using the higher level "On-Key-Do" API
-	err = shards.On("db-1", func(_ shards.Shard, tx *sql.Tx) (commit bool, err error) {
+	// Using the higher level "Querier" API, recommended if you are writing your code from scratch
+	// using github.com/gustapinto/shards
+	err = shards.On("db-1", "db-2").Do(func(s shards.Shard, tx *sql.Tx) (commit bool, err error) {
+		log.Printf("Running DML query on shard %s\n", s.Key)
+
 		if _, err := tx.Exec(`INSERT INTO example (foo) VALUES ('bar')`); err != nil {
 			return false, err
 		}

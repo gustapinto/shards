@@ -2,10 +2,12 @@ module github.com/gustapinto/shards/examples/basic_usage
 
 go 1.25.5
 
-require (
-	github.com/gustapinto/shards v0.2.1
-	github.com/jackc/pgx/v5 v5.7.6
-)
+replace github.com/gustapinto/shards => ../../
+
+// github.com/gustapinto/shards v0.2.1
+require github.com/jackc/pgx/v5 v5.7.6
+
+require github.com/gustapinto/shards v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
