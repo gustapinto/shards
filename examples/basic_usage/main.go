@@ -30,14 +30,14 @@ func main() {
 
 	// Using the higher level "Querier" API, recommended if you are writing your code from scratch
 	// using github.com/gustapinto/shards
-	err = shards.On("db-1", "db-2").FailFast().Do(func(s *shards.Shard, tx *sql.Tx) (commit bool, err error) {
+	err = shards.On("db-1", "db-2").FailFast().Do(func(s *shards.Shard, db *sql.DB) error {
 		log.Printf("Running DML query on shard %s\n", s.Key)
 
-		if _, err := tx.Exec(`INSERT INTO example (foo) VALUES ('bar')`); err != nil {
-			return false, err
+		if _, err := db.Exec(`INSERT INTO example (foo) VALUES ('bar')`); err != nil {
+			return err
 		}
 
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		log.Fatalln(err.Error())

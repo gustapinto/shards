@@ -11,12 +11,8 @@ var (
 	ErrFailedToOpenDB = errors.New("failed to open a database connection for shard")
 )
 
-// DoFunc Is the function type used by [Querier.Do], it must return (true, nil) for the transaction to commit,
-// otherwise it will be rolled back
-//
-// Please avoid commiting/rolling back the transaction inside the [DoFunc], as it may cause conflicts
-// and errors
-type DoFunc func(shard *Shard, tx *sql.Tx) (commit bool, err error)
+// DoFunc Is the function type used by [Querier.Do]
+type DoFunc func(shard *Shard, db *sql.DB) error
 
 // Querier Provides an easy to use higher level transactional API over [github.com/gustapinto/shards.DB].
 //
@@ -82,56 +78,26 @@ func (sq *Querier) doSequential(do DoFunc) (err error) {
 				return innerErr
 			}
 
-			innerErr = fmt.Errorf("failed on shard %s with error %w", shard.Key, innerErr)
-			err = errors.Join(err, innerErr)
+			err = errors.Join(err, errOnShard(shard, innerErr))
 		}
 	}
 
 	return err
 }
 
-func openTxForShardKey(key string) (*sql.Tx, error) {
-	if db := DB(key); db != nil {
-		return db.Begin()
-	}
-
-	return nil, ErrFailedToOpenDB
-}
-
 func doInShard(shard *Shard, do DoFunc) error {
-	tx, err := openTxForShardKey(shard.Key)
-	if err != nil {
+	db := DB(shard.Key)
+	if db == nil {
+		return ErrFailedToOpenDB
+	}
+
+	if err := do(shard, db); err != nil {
 		return err
-	}
-
-	shouldCommit, err := do(shard, tx)
-	if err != nil {
-		if rollbackErr := tx.Rollback(); !isTxDoneErr(rollbackErr) {
-			return errors.Join(err, rollbackErr)
-		}
-
-		return err
-	}
-
-	if !shouldCommit {
-		if rollbackErr := tx.Rollback(); !isTxDoneErr(rollbackErr) {
-			return rollbackErr
-		}
-
-		return nil
-	}
-
-	if commitErr := tx.Commit(); !isTxDoneErr(commitErr) {
-		return commitErr
 	}
 
 	return nil
 }
 
-func isTxDoneErr(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	return errors.Is(err, sql.ErrTxDone)
+func errOnShard(shard *Shard, err error) error {
+	return fmt.Errorf("failed on shard %s with error %w", shard.Key, err)
 }
