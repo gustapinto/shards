@@ -14,6 +14,10 @@ var (
 // DoFunc Is the function type used by [Querier.Do]
 type DoFunc func(shard *Shard, db *sql.DB) error
 
+// DoTxFunc Is the function type used by [Querier.DoTx], the transactional will only
+// commit on a nil error
+type DoTxFunc func(shard *Shard, tx *sql.Tx) error
+
 // Querier Provides an easy to use higher level transactional API over [github.com/gustapinto/shards.DB].
 //
 // It should not be treated as a long-lived object, instead treat it as a transactional one, you get a new one
@@ -57,21 +61,39 @@ func (sq *Querier) FailFast() *Querier {
 	return sq
 }
 
-// Do Execute the [github.com/gustapinto/shards.DoFunc] against the [github.com/gustapinto/shards.ShardQuerier]
+// Do Execute the [github.com/gustapinto/shards.DoTxFunc] against the [github.com/gustapinto/shards.Querier]
 // selected shards with a shard-specific isolation level.
 //
 // Use it with the [Querier.FailFast] configuration method in order to stop the execution on the
 // first selected shard with a non-nil error, otherwise it will return a [errors.Join] of all errors
-func (sq *Querier) Do(do DoFunc) error {
+func (sq *Querier) DoTx(do DoTxFunc) (err error) {
 	if len(sq.selectedShards) == 0 {
 		return nil
 	}
 
-	return sq.doSequential(do)
+	for _, shard := range sq.selectedShards {
+		if innerErr := doTxInShard(shard, do); innerErr != nil {
+			if sq.failFast {
+				return innerErr
+			}
+
+			err = errors.Join(err, errOnShard(shard, innerErr))
+		}
+	}
+
+	return err
 }
 
-// Package level private functions
-func (sq *Querier) doSequential(do DoFunc) (err error) {
+// Do Execute the [github.com/gustapinto/shards.DoFunc] against the [github.com/gustapinto/shards.Querier]
+// selected shards with a shard-specific isolation level.
+//
+// Use it with the [Querier.FailFast] configuration method in order to stop the execution on the
+// first selected shard with a non-nil error, otherwise it will return a [errors.Join] of all errors
+func (sq *Querier) Do(do DoFunc) (err error) {
+	if len(sq.selectedShards) == 0 {
+		return nil
+	}
+
 	for _, shard := range sq.selectedShards {
 		if innerErr := doInShard(shard, do); innerErr != nil {
 			if sq.failFast {
@@ -85,6 +107,7 @@ func (sq *Querier) doSequential(do DoFunc) (err error) {
 	return err
 }
 
+// Package level private functions
 func doInShard(shard *Shard, do DoFunc) error {
 	db := DB(shard.Key)
 	if db == nil {
@@ -95,6 +118,35 @@ func doInShard(shard *Shard, do DoFunc) error {
 		return err
 	}
 
+	return nil
+}
+
+func doTxInShard(shard *Shard, do DoTxFunc) error {
+	db := DB(shard.Key)
+	if db == nil {
+		return ErrFailedToOpenDB
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	if err := do(shard, tx); err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			if !errors.Is(rollbackErr, sql.ErrTxDone) {
+				return errors.Join(err, rollbackErr)
+			}
+		}
+
+		return err
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		if !errors.Is(commitErr, sql.ErrTxDone) {
+			return commitErr
+		}
+	}
 	return nil
 }
 
