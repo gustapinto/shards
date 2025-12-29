@@ -12,16 +12,10 @@ package shards
 
 import (
 	"database/sql"
-	"errors"
+	"sync"
 )
 
-var (
-	shardsLookupTable *SafeMap[string, *Shard] = NewSafeMap[string, *Shard]()
-
-	// ErrEmptyRegistry Is used when there is a attempt to access a non initialized
-	// registry
-	ErrEmptyRegistry = errors.New("empty registry")
-)
+var shardsLookupTable *SafeMap[string, *Shard] = NewSafeMap[string, *Shard]()
 
 type Shard struct {
 	// The shards unique key
@@ -33,28 +27,40 @@ type Shard struct {
 	// The database driver
 	Driver string
 
-	// The shard underlying database connection, used only internally by shards lib
-	db *sql.DB
+	db     *sql.DB
+	dbErr  error
+	dbOnce sync.Once
 }
 
 // NewShard Initialize a new [github.com/gustapinto/shards.Shard] object without
 // connecting to the underlying [database/sql.DB] connection
-func NewShard(key, driver, dsn string) Shard {
-	return Shard{
+func NewShard(key, driver, dsn string) *Shard {
+	return &Shard{
 		Key:    key,
 		DSN:    dsn,
 		Driver: driver,
-		db:     nil,
 	}
 }
 
 // Clone Returns a deep copy of the shard, without the private fields
-func (s Shard) Clone() Shard {
-	return Shard{
-		Key:    s.Key,
-		DSN:    s.DSN,
-		Driver: s.Driver,
+func (s *Shard) Clone() *Shard {
+	return NewShard(s.Key, s.Driver, s.DSN)
+}
+
+func (s *Shard) close() error {
+	if s.db != nil {
+		return s.db.Close()
 	}
+
+	return nil
+}
+
+func (s *Shard) connect() error {
+	s.dbOnce.Do(func() {
+		s.db, s.dbErr = sql.Open(s.Driver, s.DSN)
+	})
+
+	return s.dbErr
 }
 
 // Register Adds new shards to the internal shard lookup table, note that the key must be unique,
@@ -63,7 +69,7 @@ func (s Shard) Clone() Shard {
 //
 // The shard database connection will be lazily opened when first calling the
 // [github.com/gustapinto/shards.DB] function for the shard
-func Register(shards ...Shard) error {
+func Register(shards ...*Shard) error {
 	for _, shard := range shards {
 		if err := registerShard(shard); err != nil {
 			return err
@@ -97,22 +103,13 @@ func CloseAll() (errs []error) {
 // Note that there is no need to defer Close this [database/sql.DB] connection, as it will already
 // be closed by the [github.com/gustapinto/shards.CloseAll] method
 func DB(key string) *sql.DB {
-	if shardsLookupTable == nil {
-		return nil
-	}
-
 	shard, exists := shardsLookupTable.Get(key)
 	if !exists {
 		return nil
 	}
 
-	if shard.db == nil {
-		db, err := sql.Open(shard.Driver, shard.DSN)
-		if err != nil {
-			return nil
-		}
-
-		shard.db = db
+	if err := shard.connect(); err != nil {
+		return nil
 	}
 
 	return shard.db
@@ -120,37 +117,32 @@ func DB(key string) *sql.DB {
 
 // Lookup Returns an array of all registered shards. Note that this function does not
 // guarantee order of the returned shards slice
-func Lookup() (shards []Shard) {
-	if shardsLookupTable == nil || shardsLookupTable.Len() == 0 {
+func Lookup() (shards []*Shard) {
+	if shardsLookupTable == nil {
 		return nil
 	}
 
 	for _, shard := range shardsLookupTable.Values() {
-		shards = append(shards, *shard)
+		shards = append(shards, shard.Clone())
 	}
 
 	return shards
 }
 
 // Package level private functions
-func registerShard(shard Shard) error {
+func registerShard(shard *Shard) error {
 	if shardsLookupTable == nil {
 		shardsLookupTable = NewSafeMap[string, *Shard]()
 	} else {
 		oldShard, exists := shardsLookupTable.Get(shard.Key)
-		if exists && oldShard.db != nil {
-			if err := oldShard.db.Close(); err != nil {
+		if exists {
+			if err := oldShard.close(); err != nil {
 				return err
 			}
 		}
 	}
 
-	shardsLookupTable.Set(shard.Key, &Shard{
-		Key:    shard.Key,
-		DSN:    shard.DSN,
-		Driver: shard.Driver,
-		db:     nil,
-	})
+	shardsLookupTable.Set(shard.Key, shard)
 
 	return nil
 }
@@ -165,7 +157,7 @@ func closeShard(key string) error {
 		return nil
 	}
 
-	if err := shard.db.Close(); err != nil {
+	if err := shard.close(); err != nil {
 		return err
 	}
 

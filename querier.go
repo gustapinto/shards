@@ -16,7 +16,7 @@ var (
 //
 // Please avoid commiting/rolling back the transaction inside the [DoFunc], as it may cause conflicts
 // and errors
-type DoFunc func(shard Shard, tx *sql.Tx) (commit bool, err error)
+type DoFunc func(shard *Shard, tx *sql.Tx) (commit bool, err error)
 
 // Querier Provides an easy to use higher level transactional API over [github.com/gustapinto/shards.DB].
 //
@@ -104,7 +104,7 @@ func doInShard(shard *Shard, do DoFunc) error {
 		return err
 	}
 
-	shouldCommit, err := do(shard.Clone(), tx)
+	shouldCommit, err := do(shard, tx)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); !isTxDoneErr(rollbackErr) {
 			return errors.Join(err, rollbackErr)
